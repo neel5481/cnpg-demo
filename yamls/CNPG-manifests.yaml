@@ -1,0 +1,56 @@
+#######################################################################
+// create cluster sample...
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cluster-example
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.2
+
+  storage:
+    size: 1Gi
+
+#######################################################################
+
+#######################################################################
+// create cluster with service template ...
+Install cloud-service-kind
+go install sigs.k8s.io/cloud-provider-kind@latest
+
+sudo cloud-provider-kind
+
+// remove the control plane label if required
+kubectl label node cnpg-control-plane node.kubernetes.io/exclude-from-external-load-balancers-
+
+// once applied below yaml, check the connectivity with postgresql
+// ip address with external IP address of service in kind.
+psql -h 172.18.0.4 -U app app
+// get the password from secret
+kubectl get secret cluster-example-app -o jsonpath="{.data.password}" | base64 -d
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cluster-example
+spec:
+  instances: 3
+
+  storage:
+    size: 1Gi
+
+  managed:
+    services:
+      disabledDefaultServices: ["ro", "r"]
+      additional:
+      - selectorType: rw
+        serviceTemplate:
+          metadata:
+            name: cluster-example-rw-lb
+          spec:
+            type: LoadBalancer
+
+#######################################################################
+
+

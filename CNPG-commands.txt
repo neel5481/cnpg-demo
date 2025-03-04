@@ -1,0 +1,237 @@
+// make sure you have kind installedkind version
+kind version
+
+## 1 - Create/Install CNPG cluster
+kind create cluster --name cnpg
+
+// get kind clusters
+kind get clusters
+
+// if you have multiple context set, make sure it set to cnpg kind cluster context
+kubectl config use-context beaconator
+kubectl config current-context
+
+// install cloudnative pg ( released version)
+kubectl apply --server-side -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.25/releases/cnpg-1.25.0.yaml
+OR
+// install cloudnative pg from main branch
+curl -sSfL https://raw.githubusercontent.com/cloudnative-pg/artifacts/main/manifests/operator-manifest.yaml | kubectl apply --server-side -f -
+
+// make sure cnp gets installed
+kubectl get deployment -n cnpg-system cnpg-controller-manager
+
+// how to install cnpg plugin
+curl -sSfL \
+  https://github.com/EnterpriseDB/kubectl-cnp/raw/main/install.sh | \
+  sudo sh -s -- -b /usr/local/bin
+
+// validate with what version is installed
+kubectl cnp version
+
+// make sure, below images are pulled from
+https://github.com/cloudnative-pg/postgres-containers/pkgs/container/postgresql
+ghcr.io/cloudnative-pg/postgresql:17.2
+ghcr.io/cloudnative-pg/postgresql:17.4
+
+
+// install your first kubernetes cluster Or use 01-cluster.yaml
+kubectl apply -f \
+  https://cloudnative-pg.io/documentation/current/samples/cluster-example.yaml
+
+// check the cluster status using
+kubectl cnpg status cluster-example
+
+
+###################################################################
+// check faiover and application is still connected......
+
+// Also show how many services are installed and how to check which pod is primary/standby
+k get pods -A --show-labels | grep cluster-example
+
+// port-forward the serivce in local
+k port-forward svc/cluster-example-ro 5432:5432
+// view-secret
+k view-secret cluster-example-app -a
+// fetch URI and update
+uri='postgresql://app:1qmityf43q6yKl8qYsDbHMIjOgcDhbBkeD4PVSqqfuOvVtmTQ6RZfKA1zHkpPK12@cluster-example-rw.default:5432/app'
+
+uri='postgresql://app:1qmityf43q6yKl8qYsDbHMIjOgcDhbBkeD4PVSqqfuOvVtmTQ6RZfKA1zHkpPK12@127.0.0.1:5432/app'
+
+// how to run the postgres client
+cd ~/CloudNativePG/src/postgresql-client
+./main
+// try to delete the primary pod
+
+export DATABASE_URL="postgres://app:postgres@127.0.0.1:5432/app"
+export DATABASE_URL="postgres://app:postgres@127.0.0.1:5432/app"
+
+###################################################################
+
+
+###########################
+// inspect the users
+kubectl exec -ti -c postgres cluster-example-1 -- psql -c '\du'
+
+// inspect the databases
+kubectl exec -ti -c postgres cluster-example-1 -- psql -c '\l'
+
+############################
+
+#######################################################################################
+Inspect the certificate
+
+kubectl get secret cluster-example-ca -o jsonpath="{.data['ca\.crt']}" | base64 -d | openssl x509 -text -noout
+
+// above CA certificate is used by CloudNativePG to sign the PostgreSQL server certificate, 
+// stored in the cluster-example-server secret.
+
+// server certificate signed with above CA
+kubectl get secret cluster-example-server -o jsonpath="{.data['tls\.crt']}" | base64 -d | openssl x509 -text -noout
+
+// Look at the returned certificate, paying specific attention to the Subject and X509v3 Subject Alternative Name sections:
+// The X509v3 Subject Alternative Name section contains all the alternative names of any 
+// Kubernetes service automatically created for the cluster.
+
+// certificate for the streaming replica user, observe subject CN=streaming_replica
+kubectl get secret cluster-example-replication -o jsonpath="{.data['tls\.crt']}" | base64 -d | openssl x509 -text -noout
+
+// check, how standby is connecting to the primary cluster
+kubectl exec -ti -c postgres cluster-example-2 -- psql -qAt -c 'SHOW primary_conninfo'
+
+output of above is as below:
+host=cluster-example-rw
+user=streaming_replica
+port=5432
+sslkey=/controller/certificates/streaming_replica.key
+sslcert=/controller/certificates/streaming_replica.crt
+sslrootcert=/controller/certificates/server-ca.crt
+application_name=cluster-example-2
+sslmode=verify-ca
+
+#######################################################################################
+
+
+########################################################################################
+
+Hibernation/Rehydration
+
+kubectl annotate cluster cluster-example --overwrite cnpg.io/hibernation=on
+kubectl get cluster cluster-example -o "jsonpath={.status.conditions[?(.type==\"cnpg.io/hibernation\")]}"
+kubectl annotate cluster cluster-example --overwrite cnpg.io/hibernation=off
+
+// To Hibernate the CNPG cluster
+kubectl annotate cluster <cluster-name> --overwrite cnpg.io/hibernation=on
+
+// get the cluster status using cnpg plugin
+kubectl cnpg status <cluster-name>
+
+// rehydrate the cluster using
+kubectl annotate cluster <cluster-name> --overwrite cnpg.io/hibernation=off
+
+##########################################################################################
+// how to fence the cluster
+# to fence only one instance
+kubectl cnpg fencing on cluster-example 1
+
+# to fence all the instances in a Cluster
+kubectl cnpg fencing on cluster-example "*"
+
+# to lift the fencing only for one instance
+# N.B.: at the moment this won't work if the whole cluster was fenced previously,
+#       in that case you will have to manually set the annotation as explained above
+kubectl cnpg fencing off cluster-example 1
+
+# to lift the fencing for all the instances in a Cluster
+kubectl cnpg fencing off cluster-example "*"
+
+
+## 2 - User can also access the pgAdmin tool via cnpg plugin
+
+// cluster-example is the name of the cluster
+kubectl cnpg pgadmin4 --mode desktop cluster-example
+
+// check the status of the pgAdmin4 deployment
+kubectl rollout status deployment cluster-example-pgadmin4
+
+// port forward the service to access it via browser
+kubectl port-forward deployment/cluster-example-pgadmin4 8080:80
+
+// how to access pgAdmin4 via browser
+Then, navigate to http://localhost:8080 in your browser.
+
+To remove this pgAdmin deployment, execute
+kubectl cnpg pgadmin4 cluster-example --dry-run | kubectl delete -f -
+
+
+###################################################################
+## 3 - All about CNPG plugin
+
+
+// install it using below
+kubectl krew install cnpg
+
+// User can install the CNPG using plugin as well
+// by default it install in cnpg-system namespace but user can override with -n option
+// by default it watches all namespace...
+kubectl cnpg install generate --version 1.25 --replicas 1 > operator.yaml
+
+// check the status of the cluster
+kubectl cnpg status cluster-example
+// more verbose information can also be found, like pg_conf. pg_hba etc.
+kubectl cnpg status sandbox -v -v
+
+
+// proomte the cluster in case if we are doing maintenance and want to switch override
+kubectl cnpg promote CLUSTER CLUSTER-INSTANCE
+
+// restart the postgres cluster
+# this command will restart a whole cluster in a rollout fashion
+kubectl cnpg restart CLUSTER
+# this command will restart a single instance, according to the policy above
+kubectl cnpg restart CLUSTER INSTANCE
+
+// cluster can be reload using
+kubectl cnpg reload CLUSTER
+
+// if we want to do maintenance of all the clusters
+kubectl cnpg maintenance set --all-namespaces
+
+
+// The kubectl cnpg report command bundles various pieces of information into a ZIP file. 
+// It aims to provide the needed context to debug problems with clusters in production.
+/* deployment information: the operator Deployment and operator Pod
+   configuration: the Secrets and ConfigMaps in the operator namespace
+   events: the Events in the operator namespace
+   webhook configuration: the mutating and validating webhook configurations
+   webhook service: the webhook service
+   logs: logs for the operator Pod (optional, off by default) in JSON-lines format
+*/
+kubectl cnpg report operator -n cnpg-system
+
+// report with cluster sub command
+/*
+cluster resources: the cluster information, same as kubectl get cluster -o yaml
+cluster pods: pods in the cluster namespace matching the cluster name
+cluster jobs: jobs, if any, in the cluster namespace matching the cluster name
+events: events in the cluster namespace
+pod logs: logs for the cluster Pods (optional, off by default) in JSON-lines format
+job logs: logs for the Pods created by jobs (optional, off by default) in JSON-lines format
+*/
+kubectl cnpg report cluster CLUSTER [-n NAMESPACE] --logs
+
+
+################################################################################################
+
+// manually take the logical backup
+kubectl exec cluster-example-1 -c postgres -- pg_dump -Fc -d app > app.dump
+// restore above backup using pg_restore... this will only restore the db and not global objects like roles, users, etc.
+// in case of multiple dbs, repeat the steps above
+kubectl exec -i new-cluster-example-1 -c postgres -- pg_restore --no-owner --role=app -d app --verbose < app.dump
+
+
+// All above checking the logs of the cluster using cnp plugin
+kubectl cnpg logs cluster CLUSTER --output my-cluster.log
+
+
+
+

@@ -1,0 +1,28 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cluster-restore-pitr
+spec:
+  instances: 3
+
+  storage:
+    size: 5Gi
+
+  bootstrap:
+    recovery:
+      source: pg-backup-minio
+      recoveryTarget:
+        targetTime: "2025-02-01 05:47:22.470494"
+
+  externalClusters:
+    - name: pg-backup-minio
+      barmanObjectStore:
+        destinationPath: s3://cnpgdok/
+        endpointURL: http://minio-service:9000
+        s3Credentials:
+          accessKeyId:
+            name: backup-storage-creds
+            key: ID
+          secretAccessKey:
+            name: backup-storage-creds
+            key: KEY
