@@ -1,18 +1,16 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: cluster-restore-pitr
+  name: cluster-restore-full
 spec:
-  instances: 3
+  instances: 1
 
   storage:
-    size: 5Gi
+    size: 1Gi
 
   bootstrap:
     recovery:
       source: pg-backup-minio
-      recoveryTarget:
-        targetTime: "2025-02-01 05:47:22.470494"
 
   externalClusters:
     - name: pg-backup-minio
